@@ -1,6 +1,4 @@
-module Main
-        ( main
-        ) where
+module Main(main) where
 
 import Data.List
 import Network
@@ -12,13 +10,9 @@ import Control.Exception
 import Text.Printf
 import Prelude hiding (catch)
 import UrlExtender
+import Config
 
-server = "irc.darklordpotter.net"
-port   = 6667
-channel = "#programming"
-nick   = "HaskellBot"
-
-data Bot = Bot { socket :: Handle }
+data Bot = Bot { socket :: Handle, config :: Config }
 type Net = ReaderT Bot IO
 
 main :: IO ()
@@ -28,21 +22,24 @@ main = bracket connect disconnect loop
         loop st    = catch (runReaderT run st) (\(SomeException _) -> return ())
  
 
-connect = notify $ do
-        h <- connectTo server (PortNumber (fromIntegral port))
-        hSetBuffering h NoBuffering
-        return (Bot h)
-  where
-        notify a = bracket_
-                (printf "Connecting to %s ... " server >> hFlush stdout)
-                (putStrLn "done.")
-                a
+connect = do
+        c <- getConfig "bot.conf"
+        notify c $ do
+                h <- connectTo (configServer c) (PortNumber (fromIntegral (configPort c)))
+                hSetBuffering h NoBuffering
+                return (Bot h c)
+        where
+                notify c a = bracket_
+                        (printf "Connecting to %s ... " (configServer c) >> hFlush stdout)
+                        (putStrLn "done.")
+                        a
 
 run :: Net ()
 run = do
-        write "NICK" nick
-        write "USER" (nick++" 0 * :raven's bot")
-        write "JOIN" channel
+        c <- asks config
+        write "NICK" (configNick c)
+        write "USER" ((configNick c)++" 0 * :raven's bot")
+        write "JOIN" (configChannel c)
         asks socket >>= listen
 
 write :: String -> String -> Net ()
@@ -69,7 +66,9 @@ eval x          | "!ex" `isPrefixOf` x          = (io $ expandUrlEasy (drop 4 x)
 eval _                                          = return () -- ignore
 
 privmsg :: String -> Net ()
-privmsg s = write "PRIVMSG" $ channel ++ " :" ++ s
+privmsg s = do
+        c <- asks config
+        write "PRIVMSG" $ (configChannel c) ++ " :" ++ s
 
 io :: IO a -> Net a
 io = liftIO
